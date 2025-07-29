@@ -409,7 +409,7 @@ def main():
     }
     /* Reduce font size of st.metric numbers */
     div[data-testid="stMetric"] > div > div {
-        font-size: 1.0rem !important;
+        font-size: 0.8rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
