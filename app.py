@@ -322,95 +322,56 @@ def create_spending_charts(df):
     
     return fig_pie, fig_trend, fig_category_trend
 
-def financial_chatbot(user_question, df, predictions, monthly_income):
-    question_lower = user_question.lower()
-    if df.empty:
-        return "No transactions found. Please add some transactions first!"
+def financial_chatbot_llm(user_question, df, income_df, openai_api_key):
+    context = get_transaction_summary_for_llm(df, income_df)
+    prompt = f"""You are a smart financial assistant. Here is the user's financial data:
 
-    df['amount'] = df['amount'].fillna(0)
-    df['date'] = pd.to_datetime(df['date'], errors='coerce')
-    df['category'] = df['category'].fillna('Other')
+{context}
 
-    total_spending = abs(df['amount'].sum())
-    avg_daily = total_spending / max(1, df['date'].nunique())
-    if df['category'].isnull().all():
-        top_category = "Other"
-        top_category_amount = 0
-    else:
-        top_category = df.groupby('category')['amount'].sum().abs().idxmax()
-        top_category_amount = abs(df.groupby('category')['amount'].sum().get(top_category, 0))
+User's question: {user_question}
 
-    current_month = datetime.now().month
-    current_year = datetime.now().year
-    monthly_spending = abs(df[(df['date'].dt.month == current_month) & (df['date'].dt.year == current_year)]['amount'].sum())
+Answer in a helpful, concise, and friendly way, using the data above.
+"""
 
-    if any(word in question_lower for word in ['afford', 'budget', 'vacation', 'trip']):
-        monthly_prediction = sum(predictions.values()) if predictions else monthly_spending
-        available_budget = max(0, monthly_income - monthly_prediction)
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",  # or "gpt-4" if available
+        messages=[
+            {"role": "system", "content": "You are a helpful financial assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=400,
+        temperature=0.3,
+        api_key=openai_api_key
+    )
+    return response.choices[0].message['content']
 
-        if 'vacation' in question_lower or 'trip' in question_lower:
-            return f"""💰 **Here's my take:**
+def get_transaction_summary_for_llm(df, income_df):
+    last_tx = df.sort_values('date', ascending=False).head(50)
+    tx_lines = [
+        f"{row['date']}: {row['description']} - NGN {abs(row['amount']):,.2f} ({row['category']})"
+        for _, row in last_tx.iterrows()
+    ]
+    tx_summary = "\n".join(tx_lines)
 
-Based on your current spending patterns, your predicted monthly expenses are NGN{monthly_prediction:,.2f}.
+    income_df['date'] = pd.to_datetime(income_df['date'], errors='coerce')
+    now = datetime.now()
+    monthly_income = income_df[
+        (income_df['date'].dt.month == now.month) &
+        (income_df['date'].dt.year == now.year)
+    ]['amount'].sum()
 
-With a monthly income of NGN{monthly_income:,.2f}, you might have around NGN{available_budget:,.2f} available for discretionary spending like vacations.
+    cat_summary = df.groupby('category')['amount'].sum().abs().sort_values(ascending=False).head(3)
+    cat_lines = [f"{cat}: NGN {amt:,.2f}" for cat, amt in cat_summary.items()]
+    cat_summary_str = "\n".join(cat_lines)
 
-Your biggest expense category is {top_category} (NGN{top_category_amount:,.2f}), so look for savings there first!"""
-    
-    elif any(word in question_lower for word in ['save', 'saving', 'reduce', 'cut']):
-        savings_tips = f"""💡 **Personalized Savings Tips:**
+    return f"""Recent Transactions:
+{tx_summary}
 
-Based on your spending of NGN{total_spending:.2f} over {len(df)} transactions:
+Top Spending Categories:
+{cat_summary_str}
 
-1. **{top_category}** is your largest expense (NGN{top_category_amount:.2f})
-   - Try to reduce this by 10-15% to save NGN {top_category_amount * 0.125:.2f}
-
-2. **Daily Average:** You spend NGN {avg_daily:.2f} per day
-
-3. **Category-specific tips:**"""
-        
-        category_tips = {
-            'Food & Dining': "- Cook more meals at home\n- Use meal planning apps\n- Limit eating out to 2-3 times per week",
-            'Transportation': "- Use public transport or carpool with people going in the same direction",
-            'Shopping': "- Wait 24 hours before non-essential purchases\n- Use shopping lists",
-            'Entertainment': "- Try free activities like chatting with a neighbour or taking a walk in your estate"
-        }
-        
-        if top_category in category_tips:
-            savings_tips += f"\n{category_tips[top_category]}"
-        
-        return savings_tips
-    
-    elif any(word in question_lower for word in ['spend', 'spending', 'expense']):
-        return f"""📊 **Your Spending Summary:**
-
-- **Total Spending:** NGN {total_spending:.2f}
-- **Average Daily:** NGN {avg_daily:.2f}
-- **Top Category:** {top_category} (NGN {top_category_amount:.2f})
-- **Number of Transactions:** {len(df)}
-
-**Predicted Next Month:** NGN {sum(predictions.values()):.2f}'"""
-    
-    elif any(word in question_lower for word in ['predict', 'future', 'forecast']):
-        if predictions:
-            pred_text = "🔮 **Spending Predictions for Next 30 Days:**\n\n"
-            for category, amount in sorted(predictions.items(), key=lambda x: x[1], reverse=True):
-                pred_text += f"- **{category}:** NGN {amount:.2f}\n"
-            pred_text += f"\n**Total Predicted:** NGN {sum(predictions.values()):.2f}"
-            return pred_text
-        else:
-            return "I need more transaction data to make accurate predictions. Please add more transactions!"
-    
-    else:
-        return f"""🤖 **I can help you with:**
-
-- **Budget questions:** "Can I afford a vacation?" 
-- **Savings advice:** "How can I save money?"
-- **Spending analysis:** "How much do I spend on food?"
-- **Predictions:** "What will I spend next month?"
-
-Your current spending summary: NGN {total_spending:.2f} total, NGN {avg_daily:.2f} daily average.
-Top category: {top_category} (NGN{top_category_amount:.2f})"""
+Monthly Income: NGN {monthly_income:,.2f}
+"""
 
 def main():
     st.markdown("""
@@ -445,7 +406,7 @@ def main():
     }
     /* Reduce font size of st.metric numbers */
     div[data-testid="stMetric"] > div > div {
-        font-size: 0.8rem !important;
+        font-size: 1.0rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -693,9 +654,10 @@ def main():
                     st.success(f"Recognized: {user_question}")
                 st.session_state['audio_file_path'] = None
 
+        openai_api_key = st.secrets["openai"]["api_key"]
+
         if st.button("Ask") and user_question:
-            predictions = st.session_state.predictor.predict_future_spending(transactions)
-            bot_response = financial_chatbot(user_question, transactions, predictions, monthly_income)
+            bot_response = financial_chatbot_llm(user_question, transactions, income, openai_api_key)
             st.session_state.chat_history.append(("user", user_question))
             st.session_state.chat_history.append(("bot", bot_response))
             st.rerun()
@@ -723,7 +685,7 @@ def main():
         for question in quick_questions:
             if st.button(question, key=f"quick_{question}"):
                 predictions = st.session_state.predictor.predict_future_spending(df)
-                bot_response = financial_chatbot(question, df, predictions, st.session_state.monthly_income)
+                bot_response = financial_chatbot_llm(question, df, predictions, st.session_state.monthly_income)
                 st.session_state.chat_history.append(("user", question))
                 st.session_state.chat_history.append(("bot", bot_response))
                 st.rerun()
