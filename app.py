@@ -333,7 +333,7 @@ Answer in a helpful, concise, and friendly way, using the data above.
         "Content-Type": "application/json"
     }
     data = {
-        "model": "mistralai/mistral-7b-instruct",  # You can use other models listed on OpenRouter
+        "model": "mistralai/mistral-7b-instruct",
         "messages": [
             {"role": "system", "content": "You are a helpful financial assistant."},
             {"role": "user", "content": prompt}
@@ -342,7 +342,10 @@ Answer in a helpful, concise, and friendly way, using the data above.
         "temperature": 0.3
     }
     response = requests.post(url, headers=headers, json=data, timeout=60)
-    response.raise_for_status()
+    if not response.ok:
+        # Show the error message from OpenRouter in the Streamlit app
+        st.error(f"OpenRouter API error: {response.status_code} - {response.text}")
+        return "Sorry, there was an error with the OpenRouter API. Please check your API key, quota, and model name."
     return response.json()["choices"][0]["message"]["content"]
 
 def get_transaction_summary_for_llm(df, income_df):
