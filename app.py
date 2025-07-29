@@ -445,7 +445,7 @@ def main():
     }
     /* Reduce font size of st.metric numbers */
     div[data-testid="stMetric"] > div > div {
-        font-size: 0.8rem !important;
+        font-size: 1.0rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -499,11 +499,7 @@ def main():
         income_date = st.date_input("Income Date", datetime.now())
         income_amount = st.number_input("Income Amount (NGN)", min_value=0.0, step=1000.0, format="%.2f")
         if st.button("Include Income"):
-            new_income = pd.DataFrame({
-                'date': [income_date.strftime('%Y-%m-%d')],
-                'amount': [income_amount]
-            })
-            st.session_state.income = pd.concat([st.session_state.income, new_income], ignore_index=True)
+            save_income(st.session_state.username, income_date.strftime('%Y-%m-%d'), income_amount)
             st.success(f"Added income: NGN {income_amount:,.2f} on {income_date.strftime('%Y-%m-%d')}")
             st.rerun()
 
@@ -515,23 +511,10 @@ def main():
             date = st.date_input("Date", datetime.now())
             description = st.text_input("Description", placeholder="")
             amount = st.number_input("Amount (NGN)", min_value=100, step=100)
-            
             if st.form_submit_button("Add Transaction"):
                 predicted_category = st.session_state.classifier.predict_category(description)
-                
-                new_transaction = pd.DataFrame({
-                    'date': [date.strftime('%Y-%m-%d')],
-                    'description': [description],
-                    'amount': [-abs(amount)],
-                    'category': [predicted_category]
-                })
-                
-                st.session_state.transactions = pd.concat([
-                    st.session_state.transactions, 
-                    new_transaction
-                ], ignore_index=True)
-                
-                st.success(f"Added transaction: {description} (NGN {amount:.2f}) - Category: {predicted_category}")
+                save_transaction(st.session_state.username, date.strftime('%Y-%m-%d'), description, -abs(amount), predicted_category)
+                st.success(f"Added transaction: {description} (NGN {amount:,.2f}) - Category: {predicted_category}")
                 st.rerun()
         
         st.markdown("---")
@@ -550,6 +533,14 @@ def main():
             else:
                 st.warning("Need more data to train classifier")
         
+        if st.session_state.logged_in:
+            if st.button("Logout", key="logout_btn"):
+                st.session_state.logged_in = False
+                st.session_state.username = ""
+                st.session_state.transactions = pd.DataFrame(columns=['date', 'description', 'amount', 'category'])
+                st.session_state.income = pd.DataFrame(columns=['date', 'amount'])
+                st.success("Logged out!")
+                st.rerun()
     
     income_df = st.session_state.income.copy()
     income_df['date'] = pd.to_datetime(income_df['date'], errors='coerce')
@@ -824,9 +815,9 @@ def main():
             cols[4].write(f"NGN {abs(row['amount']):,.2f}")
             if cols[5].button("Delete", key=f"del_{idx}_{row['type']}"):
                 if row['type'] == 'Expense':
-                    st.session_state.transactions = st.session_state.transactions.drop(idx)
+                    delete_transaction(username, row['date'].strftime('%Y-%m-%d'), row['description'], row['amount'])
                 else:
-                    st.session_state.income = st.session_state.income.drop(idx)
+                    delete_income(username, row['date'].strftime('%Y-%m-%d'), row['amount'])
                 st.success("Entry deleted!")
                 st.rerun()
 
