@@ -389,7 +389,7 @@ Based on your spending of NGN{total_spending:.2f} over {len(df)} transactions:
 - **Top Category:** {top_category} (NGN {top_category_amount:.2f})
 - **Number of Transactions:** {len(df)}
 
-**Predicted Next Month:** NGN {sum(predictions.values()):.2f} if predictions else 'Need more data for predictions'"""
+**Predicted Next Month:** NGN {sum(predictions.values()):.2f}'"""
     
     elif any(word in question_lower for word in ['predict', 'future', 'forecast']):
         if predictions:
