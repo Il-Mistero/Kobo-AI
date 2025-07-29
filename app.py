@@ -1,3 +1,4 @@
+import sqlite3
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -17,51 +18,82 @@ import openai
 import av
 import tempfile
 
-st.set_page_config(
-    page_title="Kobo-AI",
-    page_icon="💰",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+def get_db():
+    conn = sqlite3.connect("budgetify.db", check_same_thread=False)
+    return conn
 
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .metric-card {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-        margin: 0.5rem 0;
-    }
-    .chat-message {
-        padding: 1rem;
-        border-radius: 10px;
-        margin: 0.5rem 0;
-    }
-    .user-message {
-        background-color: #e3f2fd;
-        border-left: 4px solid #2196f3;
-    }
-    .bot-message {
-        background-color: #f3e5f5;
-        border-left: 4px solid #9c27b0;
-    }
-    /* Reduce font size of st.metric numbers */
-    div[data-testid="stMetric"] > div > div {
-        font-size: 1.0rem !important;
-    }
-</style>
-""", unsafe_allow_html=True)
+def create_tables():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY,
+        password TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS transactions (
+        username TEXT,
+        date TEXT,
+        description TEXT,
+        amount REAL,
+        category TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS income (
+        username TEXT,
+        date TEXT,
+        amount REAL
+    )''')
+    conn.commit()
 
-openai.api_key = "YOUR_OPENAI_API_KEY"
+create_tables()
+
+def register_user(username, password):
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+def login_user(username, password):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+    return c.fetchone() is not None
+
+def load_transactions(username):
+    conn = get_db()
+    df = pd.read_sql_query("SELECT * FROM transactions WHERE username=?", conn, params=(username,))
+    return df
+
+def load_income(username):
+    conn = get_db()
+    df = pd.read_sql_query("SELECT * FROM income WHERE username=?", conn, params=(username,))
+    return df
+
+def save_transaction(username, date, description, amount, category):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?)", (username, date, description, amount, category))
+    conn.commit()
+
+def save_income(username, date, amount):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("INSERT INTO income VALUES (?, ?, ?)", (username, date, amount))
+    conn.commit()
+
+def delete_transaction(username, date, description, amount):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM transactions WHERE username=? AND date=? AND description=? AND amount=?", (username, date, description, amount))
+    conn.commit()
+
+def delete_income(username, date, amount):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM income WHERE username=? AND date=? AND amount=?", (username, date, amount))
+    conn.commit()
 
 class AudioProcessor(AudioProcessorBase):
     def recv(self, frame):
@@ -381,7 +413,75 @@ Your current spending summary: NGN {total_spending:.2f} total, NGN {avg_daily:.2
 Top category: {top_category} (NGN{top_category_amount:.2f})"""
 
 def main():
-    st.markdown('<h1 class="main-header">💰 Kobo-AI </h1>', unsafe_allow_html=True)
+    st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .metric-card {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        margin: 0.5rem 0;
+    }
+    .chat-message {
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+    }
+    .user-message {
+        background-color: #e3f2fd;
+        border-left: 4px solid #2196f3;
+    }
+    .bot-message {
+        background-color: #f3e5f5;
+        border-left: 4px solid #9c27b0;
+    }
+    /* Reduce font size of st.metric numbers */
+    div[data-testid="stMetric"] > div > div {
+        font-size: 1.0rem !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+    
+    st.markdown('<h1 class="main-header">Kobo-AI</h1>', unsafe_allow_html=True)
+
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+        st.session_state.username = ""
+
+    if not st.session_state.logged_in:
+        tab1, tab2 = st.tabs(["Login", "Register"])
+        with tab1:
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            if st.button("Login"):
+                if login_user(username, password):
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.success("Login successful!")
+                    st.rerun()
+                else:
+                    st.error("Invalid credentials.")
+        with tab2:
+            new_username = st.text_input("New Username")
+            new_password = st.text_input("New Password", type="password")
+            if st.button("Register"):
+                if register_user(new_username, new_password):
+                    st.success("Registration successful! Please login.")
+                else:
+                    st.error("Username already exists.")
+        return
+
+    username = st.session_state.username
+    transactions = load_transactions(username)
+    income = load_income(username)
 
     if 'transactions' not in st.session_state:
         st.session_state.transactions = pd.DataFrame(columns=['date', 'description', 'amount', 'category'])
