@@ -6,3 +6,4 @@ plotly
 openai
 streamlit-webrtc
 av
+SQLite3
