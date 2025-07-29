@@ -18,7 +18,7 @@ import av
 import tempfile
 
 st.set_page_config(
-    page_title="BudgetAI",
+    page_title="Kobo-AI",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -381,7 +381,7 @@ Your current spending summary: NGN {total_spending:.2f} total, NGN {avg_daily:.2
 Top category: {top_category} (NGN{top_category_amount:.2f})"""
 
 def main():
-    st.markdown('<h1 class="main-header">💰 KoboAI </h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">💰 Kobo-AI </h1>', unsafe_allow_html=True)
 
     if 'transactions' not in st.session_state:
         st.session_state.transactions = pd.DataFrame(columns=['date', 'description', 'amount', 'category'])
@@ -581,7 +581,7 @@ def main():
             async_processing=True,
         )
 
-        user_question = st.text_input("Ask a question:", placeholder="e.g., Can I afford a $500 vacation?")
+        user_question = st.text_input("Ask a question:", placeholder="")
 
         if 'audio_file_path' in st.session_state and st.session_state['audio_file_path']:
             with st.spinner("Transcribing audio..."):
