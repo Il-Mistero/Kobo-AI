@@ -542,7 +542,8 @@ def main():
                 st.success("Logged out!")
                 st.rerun()
     
-    income_df = st.session_state.income.copy()
+    df = transactions
+    income_df = income.copy()
     income_df['date'] = pd.to_datetime(income_df['date'], errors='coerce')
     now = datetime.now()
     monthly_income = income_df[
@@ -555,7 +556,14 @@ def main():
     ])
 
     with tab1:
-        df = st.session_state.transactions
+        df = transactions
+        income_df = income.copy()
+        income_df['date'] = pd.to_datetime(income_df['date'], errors='coerce')
+        now = datetime.now()
+        monthly_income = income_df[
+            (income_df['date'].dt.month == now.month) &
+            (income_df['date'].dt.year == now.year)
+        ]['amount'].sum()
 
         if df.empty:
             total_spending = 0
@@ -686,8 +694,8 @@ def main():
                 st.session_state['audio_file_path'] = None
 
         if st.button("Ask") and user_question:
-            predictions = st.session_state.predictor.predict_future_spending(df)
-            bot_response = financial_chatbot(user_question, df, predictions, st.session_state.monthly_income)
+            predictions = st.session_state.predictor.predict_future_spending(transactions)
+            bot_response = financial_chatbot(user_question, transactions, predictions, monthly_income)
             st.session_state.chat_history.append(("user", user_question))
             st.session_state.chat_history.append(("bot", bot_response))
             st.rerun()
@@ -784,8 +792,8 @@ def main():
         st.subheader("🗂️ Master Summary by Month")
 
         all_dates = pd.concat([
-            pd.to_datetime(st.session_state.transactions['date'], errors='coerce'),
-            pd.to_datetime(st.session_state.income['date'], errors='coerce')
+            pd.to_datetime(transactions['date'], errors='coerce'),
+            pd.to_datetime(income['date'], errors='coerce')
         ]).dropna()
         if not all_dates.empty:
             months = sorted(all_dates.dt.to_period('M').unique(), reverse=True)
@@ -793,10 +801,10 @@ def main():
         else:
             selected_month = pd.Period(datetime.now(), freq='M')
 
-        tx_df = st.session_state.transactions.copy()
+        tx_df = transactions.copy()
         tx_df['date'] = pd.to_datetime(tx_df['date'], errors='coerce')
         tx_df['type'] = 'Expense'
-        income_df = st.session_state.income.copy()
+        income_df = income.copy()
         income_df['date'] = pd.to_datetime(income_df['date'], errors='coerce')
         income_df['description'] = 'Income'
         income_df['category'] = 'Income'
