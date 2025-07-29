@@ -17,6 +17,7 @@ from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, WebRtcMode
 import openai
 import av
 import tempfile
+import requests
 
 def get_db():
     conn = sqlite3.connect("budgetify.db", check_same_thread=False)
@@ -287,19 +288,15 @@ def generate_sample_data():
     })
 
 def create_spending_charts(df):
-    
     category_totals = df.groupby('category')['amount'].sum().abs()
-    
     fig_pie = px.pie(
         values=category_totals.values,
         names=category_totals.index,
         title="Spending by Category",
         color_discrete_sequence=px.colors.qualitative.Set3
     )
-    
     df['date'] = pd.to_datetime(df['date'])
     daily_spending = df.groupby('date')['amount'].sum().abs().reset_index()
-    
     fig_trend = px.line(
         daily_spending,
         x='date',
@@ -308,9 +305,7 @@ def create_spending_charts(df):
         labels={'amount': 'Amount (NGN)', 'date': 'Date'}
     )
     fig_trend.update_traces(line_color='#1f77b4', line_width=3)
-    
     category_daily = df.groupby(['date', 'category'])['amount'].sum().abs().reset_index()
-    
     fig_category_trend = px.line(
         category_daily,
         x='date',
@@ -319,10 +314,9 @@ def create_spending_charts(df):
         title="Category Spending Trends",
         labels={'amount': 'Amount (NGN)', 'date': 'Date'}
     )
-    
     return fig_pie, fig_trend, fig_category_trend
 
-def financial_chatbot_llm(user_question, df, income_df, openai_api_key):
+def financial_chatbot_llm(user_question, df, income_df, openrouter_api_key):
     context = get_transaction_summary_for_llm(df, income_df)
     prompt = f"""You are a smart financial assistant. Here is the user's financial data:
 
@@ -333,17 +327,23 @@ User's question: {user_question}
 Answer in a helpful, concise, and friendly way, using the data above.
 """
 
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",  # or "gpt-4" if available
-        messages=[
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {openrouter_api_key}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "mistralai/mistral-7b-instruct",  # You can use other models listed on OpenRouter
+        "messages": [
             {"role": "system", "content": "You are a helpful financial assistant."},
             {"role": "user", "content": prompt}
         ],
-        max_tokens=400,
-        temperature=0.3,
-        api_key=openai_api_key
-    )
-    return response.choices[0].message['content']
+        "max_tokens": 400,
+        "temperature": 0.3
+    }
+    response = requests.post(url, headers=headers, json=data, timeout=60)
+    response.raise_for_status()
+    return response.json()["choices"][0]["message"]["content"]
 
 def get_transaction_summary_for_llm(df, income_df):
     last_tx = df.sort_values('date', ascending=False).head(50)
@@ -444,10 +444,6 @@ def main():
     transactions = load_transactions(username)
     income = load_income(username)
 
-    if 'transactions' not in st.session_state:
-        st.session_state.transactions = pd.DataFrame(columns=['date', 'description', 'amount', 'category'])
-    if 'income' not in st.session_state:
-        st.session_state.income = pd.DataFrame(columns=['date', 'amount'])
     if 'classifier' not in st.session_state:
         st.session_state.classifier = ExpenseClassifier()
     if 'predictor' not in st.session_state:
@@ -460,7 +456,7 @@ def main():
         income_date = st.date_input("Income Date", datetime.now())
         income_amount = st.number_input("Income Amount (NGN)", min_value=0.0, step=1000.0, format="%.2f")
         if st.button("Include Income"):
-            save_income(st.session_state.username, income_date.strftime('%Y-%m-%d'), income_amount)
+            save_income(username, income_date.strftime('%Y-%m-%d'), income_amount)
             st.success(f"Added income: NGN {income_amount:,.2f} on {income_date.strftime('%Y-%m-%d')}")
             st.rerun()
 
@@ -474,7 +470,7 @@ def main():
             amount = st.number_input("Amount (NGN)", min_value=100, step=100)
             if st.form_submit_button("Add Transaction"):
                 predicted_category = st.session_state.classifier.predict_category(description)
-                save_transaction(st.session_state.username, date.strftime('%Y-%m-%d'), description, -abs(amount), predicted_category)
+                save_transaction(username, date.strftime('%Y-%m-%d'), description, -abs(amount), predicted_category)
                 st.success(f"Added transaction: {description} (NGN {amount:,.2f}) - Category: {predicted_category}")
                 st.rerun()
         
@@ -483,12 +479,15 @@ def main():
         st.header("🔧 Data Management")
         
         if st.button("Load Sample Data"):
-            st.session_state.transactions = generate_sample_data()
+            sample_df = generate_sample_data()
+            for _, row in sample_df.iterrows():
+                save_transaction(username, row['date'], row['description'], -abs(row['amount']), row['category'])
             st.success("Sample data loaded!")
             st.rerun()
         
         if st.button("Train AI Classifier"):
-            success = st.session_state.classifier.train_model(st.session_state.transactions)
+            # Use all user transactions for training
+            success = st.session_state.classifier.train_model(transactions)
             if success:
                 st.success("AI classifier trained successfully!")
             else:
@@ -498,8 +497,7 @@ def main():
             if st.button("Logout", key="logout_btn"):
                 st.session_state.logged_in = False
                 st.session_state.username = ""
-                st.session_state.transactions = pd.DataFrame(columns=['date', 'description', 'amount', 'category'])
-                st.session_state.income = pd.DataFrame(columns=['date', 'amount'])
+                st.session_state.chat_history = []
                 st.success("Logged out!")
                 st.rerun()
     
@@ -654,10 +652,11 @@ def main():
                     st.success(f"Recognized: {user_question}")
                 st.session_state['audio_file_path'] = None
 
-        openai_api_key = st.secrets["openai"]["api_key"]
+        openrouter_api_key = st.secrets["openrouter"]["api_key"]
 
         if st.button("Ask") and user_question:
-            bot_response = financial_chatbot_llm(user_question, transactions, income, openai_api_key)
+            openrouter_api_key = st.secrets["openrouter"]["api_key"]
+            bot_response = financial_chatbot_llm(user_question, transactions, income, openrouter_api_key)
             st.session_state.chat_history.append(("user", user_question))
             st.session_state.chat_history.append(("bot", bot_response))
             st.rerun()
@@ -684,8 +683,7 @@ def main():
         
         for question in quick_questions:
             if st.button(question, key=f"quick_{question}"):
-                predictions = st.session_state.predictor.predict_future_spending(df)
-                bot_response = financial_chatbot_llm(question, df, predictions, st.session_state.monthly_income)
+                bot_response = financial_chatbot_llm(question, transactions, income, openrouter_api_key)
                 st.session_state.chat_history.append(("user", question))
                 st.session_state.chat_history.append(("bot", bot_response))
                 st.rerun()
