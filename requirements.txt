@@ -8,5 +8,4 @@ streamlit-webrtc
 av
 LinearRegression
 requests
-BeautifulSoup
 Prophet
