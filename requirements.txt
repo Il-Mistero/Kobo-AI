@@ -9,3 +9,4 @@ av
 LinearRegression
 requests
 Prophet
+BeautifulSoup
