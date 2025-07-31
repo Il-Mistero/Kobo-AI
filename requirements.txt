@@ -6,7 +6,7 @@ plotly
 openai
 streamlit-webrtc
 av
-Linear Regression
+LinearRegression
 requests
 BeautifulSoup
 Prophet
